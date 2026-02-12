@@ -1,7 +1,5 @@
 <div align="center">
-  <img src="/assets/logo.png" width="100" />
-
-  <h1 align="center">Agent Core</h1>
+  <h1 align="center">🤖 Agent Core</h1>
 
 [Website](https://omni.dev) | [Docs](https://docs.omni.dev) | [Feedback](https://backfeed.omni.dev/workspaces/omni) | [Discord](https://discord.gg/omnidotdev) | [X](https://x.com/omnidotdev)
 
