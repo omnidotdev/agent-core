@@ -102,9 +102,10 @@ impl PlanManager {
 
     /// Get default global plans directory.
     fn default_global_dir() -> PathBuf {
-        directories::BaseDirs::new()
-            .map(|base| base.data_dir().join("omni").join("cli").join("plans"))
-            .unwrap_or_else(|| PathBuf::from(".omni/plans"))
+        directories::BaseDirs::new().map_or_else(
+            || PathBuf::from(".omni/plans"),
+            |base| base.data_dir().join("omni").join("cli").join("plans"),
+        )
     }
 
     /// Sanitize a slug for use in filenames.

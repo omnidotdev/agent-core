@@ -6,4 +6,5 @@ pub mod permission;
 pub mod plan;
 pub mod provider;
 pub mod providers;
+pub mod registry;
 pub mod types;
