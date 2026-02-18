@@ -5,9 +5,6 @@ use std::collections::HashMap;
 use super::types::{ModelInfo, ProviderApiType, ProviderConfig};
 
 /// Get the default provider configurations
-///
-/// Returns all built-in providers (excludes consumer-specific
-/// providers like synapse)
 #[must_use]
 pub fn default_providers() -> HashMap<String, ProviderConfig> {
     let mut providers = HashMap::new();
@@ -108,6 +105,16 @@ pub fn default_providers() -> HashMap<String, ProviderConfig> {
             api_type: ProviderApiType::OpenAi,
             base_url: Some("https://api.moonshot.cn/v1".to_string()),
             api_key_env: Some("MOONSHOT_API_KEY".to_string()),
+            api_key: None,
+        },
+    );
+
+    providers.insert(
+        "synapse".to_string(),
+        ProviderConfig {
+            api_type: ProviderApiType::Synapse,
+            base_url: Some("http://localhost:6000".to_string()),
+            api_key_env: Some("SYNAPSE_API_KEY".to_string()),
             api_key: None,
         },
     );
@@ -240,7 +247,7 @@ mod tests {
     #[test]
     fn default_providers_has_expected_count() {
         let providers = default_providers();
-        assert_eq!(providers.len(), 10);
+        assert_eq!(providers.len(), 11);
     }
 
     #[test]
@@ -257,6 +264,7 @@ mod tests {
             "openrouter",
             "together",
             "kimi",
+            "synapse",
         ];
         for name in &expected {
             assert!(providers.contains_key(*name), "missing provider: {name}");

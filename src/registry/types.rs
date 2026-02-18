@@ -21,6 +21,8 @@ pub enum ProviderApiType {
     Groq,
     /// Mistral API
     Mistral,
+    /// Synapse AI router (unified LLM gateway)
+    Synapse,
     /// Extension point for consumer-specific providers
     Custom(String),
 }
@@ -33,6 +35,7 @@ impl Serialize for ProviderApiType {
             Self::Google => serializer.serialize_str("google"),
             Self::Groq => serializer.serialize_str("groq"),
             Self::Mistral => serializer.serialize_str("mistral"),
+            Self::Synapse => serializer.serialize_str("synapse"),
             Self::Custom(s) => serializer.serialize_str(s),
         }
     }
@@ -53,6 +56,7 @@ impl From<&str> for ProviderApiType {
             "google" => Self::Google,
             "groq" => Self::Groq,
             "mistral" => Self::Mistral,
+            "synapse" => Self::Synapse,
             other => Self::Custom(other.to_string()),
         }
     }
@@ -66,6 +70,7 @@ impl fmt::Display for ProviderApiType {
             Self::Google => write!(f, "google"),
             Self::Groq => write!(f, "groq"),
             Self::Mistral => write!(f, "mistral"),
+            Self::Synapse => write!(f, "synapse"),
             Self::Custom(s) => write!(f, "{s}"),
         }
     }
@@ -112,6 +117,7 @@ mod tests {
             (ProviderApiType::Google, "\"google\""),
             (ProviderApiType::Groq, "\"groq\""),
             (ProviderApiType::Mistral, "\"mistral\""),
+            (ProviderApiType::Synapse, "\"synapse\""),
         ];
 
         for (variant, expected_json) in &variants {
@@ -124,12 +130,19 @@ mod tests {
 
     #[test]
     fn serde_custom_variant() {
-        let custom = ProviderApiType::Custom("synapse".to_string());
+        let custom = ProviderApiType::Custom("some-provider".to_string());
         let json = serde_json::to_string(&custom).unwrap();
-        assert_eq!(json, "\"synapse\"");
+        assert_eq!(json, "\"some-provider\"");
 
         let deserialized: ProviderApiType = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, custom);
+    }
+
+    #[test]
+    fn synapse_deserializes_to_named_variant() {
+        let json = "\"synapse\"";
+        let result: ProviderApiType = serde_json::from_str(json).unwrap();
+        assert_eq!(result, ProviderApiType::Synapse);
     }
 
     #[test]
@@ -150,8 +163,8 @@ mod tests {
     #[test]
     fn provider_config_toml_round_trip() {
         let config = ProviderConfig {
-            api_type: ProviderApiType::Custom("synapse".to_string()),
-            base_url: Some("http://localhost:6000".to_string()),
+            api_type: ProviderApiType::Synapse,
+            base_url: Some("http://localhost:6111".to_string()),
             api_key_env: None,
             api_key: None,
         };

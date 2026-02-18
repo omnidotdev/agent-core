@@ -88,6 +88,15 @@ impl ProviderRegistry {
                     .ok_or_else(|| anyhow::anyhow!("API key not set for provider '{name}'"))?;
                 Ok(Box::new(UnifiedProvider::mistral(key)?))
             }
+            ProviderApiType::Synapse => {
+                let factory = self.custom_factories.get("synapse").ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "synapse provider not available — register a factory for 'synapse' \
+                         (e.g., via synapse-client with the agent-core feature)"
+                    )
+                })?;
+                factory(name, config)
+            }
             ProviderApiType::Custom(type_name) => {
                 let factory = self.custom_factories.get(type_name).ok_or_else(|| {
                     anyhow::anyhow!("no factory registered for custom provider type '{type_name}'")
