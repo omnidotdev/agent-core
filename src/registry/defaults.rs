@@ -113,7 +113,7 @@ pub fn default_providers() -> HashMap<String, ProviderConfig> {
         "synapse".to_string(),
         ProviderConfig {
             api_type: ProviderApiType::Synapse,
-            base_url: Some("http://localhost:6000".to_string()),
+            base_url: Some("https://gateway.synapse.omni.dev".to_string()),
             api_key_env: Some("SYNAPSE_API_KEY".to_string()),
             api_key: None,
         },
