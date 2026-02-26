@@ -90,6 +90,12 @@ cargo test    # Run tests
 cargo clippy  # Lint
 ```
 
+## Ecosystem
+
+- **[Omni CLI](https://github.com/omnidotdev/cli)**: Agentic CLI powered by Agent Core
+- **[Beacon](https://github.com/omnidotdev/beacon-gateway)**: Voice and messaging gateway powered by Agent Core
+- **[Omni Terminal](https://github.com/omnidotdev/terminal)**: GPU-accelerated terminal emulator built to run everywhere
+
 ## License
 
 The code in this repository is licensed under MIT, &copy; [Omni LLC](https://omni.dev). See [LICENSE.md](LICENSE.md) for more information.
