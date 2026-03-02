@@ -2,6 +2,7 @@
 
 pub mod conversation;
 pub mod error;
+pub mod knowledge;
 pub mod permission;
 pub mod plan;
 pub mod provider;

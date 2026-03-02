@@ -4,122 +4,93 @@ use std::collections::HashMap;
 
 use super::types::{ModelInfo, ProviderApiType, ProviderConfig};
 
+/// Build a `ProviderConfig` with optional base URL and env var
+fn provider(
+    api_type: ProviderApiType,
+    base_url: Option<&str>,
+    api_key_env: Option<&str>,
+) -> ProviderConfig {
+    ProviderConfig {
+        api_type,
+        base_url: base_url.map(String::from),
+        api_key_env: api_key_env.map(String::from),
+        api_key: None,
+    }
+}
+
 /// Get the default provider configurations
 #[must_use]
 pub fn default_providers() -> HashMap<String, ProviderConfig> {
-    let mut providers = HashMap::new();
-
-    providers.insert(
-        "anthropic".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::Anthropic,
-            base_url: None,
-            api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "openai".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::OpenAi,
-            base_url: None,
-            api_key_env: Some("OPENAI_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "ollama".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::OpenAi,
-            base_url: Some("http://localhost:11434/v1".to_string()),
-            api_key_env: None,
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "lmstudio".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::OpenAi,
-            base_url: Some("http://localhost:1234/v1".to_string()),
-            api_key_env: None,
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "groq".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::Groq,
-            base_url: None,
-            api_key_env: Some("GROQ_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "google".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::Google,
-            base_url: None,
-            api_key_env: Some("GOOGLE_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "mistral".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::Mistral,
-            base_url: None,
-            api_key_env: Some("MISTRAL_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "openrouter".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::OpenAi,
-            base_url: Some("https://openrouter.ai/api/v1".to_string()),
-            api_key_env: Some("OPENROUTER_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "together".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::OpenAi,
-            base_url: Some("https://api.together.xyz/v1".to_string()),
-            api_key_env: Some("TOGETHER_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "kimi".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::OpenAi,
-            base_url: Some("https://api.moonshot.cn/v1".to_string()),
-            api_key_env: Some("MOONSHOT_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers.insert(
-        "synapse".to_string(),
-        ProviderConfig {
-            api_type: ProviderApiType::Synapse,
-            base_url: Some("https://gateway.synapse.omni.dev".to_string()),
-            api_key_env: Some("SYNAPSE_API_KEY".to_string()),
-            api_key: None,
-        },
-    );
-
-    providers
+    HashMap::from([
+        (
+            "anthropic".into(),
+            provider(ProviderApiType::Anthropic, None, Some("ANTHROPIC_API_KEY")),
+        ),
+        (
+            "openai".into(),
+            provider(ProviderApiType::OpenAi, None, Some("OPENAI_API_KEY")),
+        ),
+        (
+            "ollama".into(),
+            provider(
+                ProviderApiType::OpenAi,
+                Some("http://localhost:11434/v1"),
+                None,
+            ),
+        ),
+        (
+            "lmstudio".into(),
+            provider(
+                ProviderApiType::OpenAi,
+                Some("http://localhost:1234/v1"),
+                None,
+            ),
+        ),
+        (
+            "groq".into(),
+            provider(ProviderApiType::Groq, None, Some("GROQ_API_KEY")),
+        ),
+        (
+            "google".into(),
+            provider(ProviderApiType::Google, None, Some("GOOGLE_API_KEY")),
+        ),
+        (
+            "mistral".into(),
+            provider(ProviderApiType::Mistral, None, Some("MISTRAL_API_KEY")),
+        ),
+        (
+            "openrouter".into(),
+            provider(
+                ProviderApiType::OpenAi,
+                Some("https://openrouter.ai/api/v1"),
+                Some("OPENROUTER_API_KEY"),
+            ),
+        ),
+        (
+            "together".into(),
+            provider(
+                ProviderApiType::OpenAi,
+                Some("https://api.together.xyz/v1"),
+                Some("TOGETHER_API_KEY"),
+            ),
+        ),
+        (
+            "kimi".into(),
+            provider(
+                ProviderApiType::OpenAi,
+                Some("https://api.moonshot.cn/v1"),
+                Some("MOONSHOT_API_KEY"),
+            ),
+        ),
+        (
+            "synapse".into(),
+            provider(
+                ProviderApiType::Synapse,
+                Some("https://gateway.synapse.omni.dev"),
+                Some("SYNAPSE_API_KEY"),
+            ),
+        ),
+    ])
 }
 
 /// Get the default model definitions
