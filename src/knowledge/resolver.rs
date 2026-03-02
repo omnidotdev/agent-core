@@ -422,6 +422,7 @@ mod tests {
                 model: "text-embedding-3-small".to_string(),
                 dimensions: 3,
                 vectors,
+                contextual: false,
             }),
         };
 
@@ -488,6 +489,7 @@ mod tests {
                 model: "text-embedding-3-small".to_string(),
                 dimensions: 3,
                 vectors,
+                contextual: false,
             }),
         };
 

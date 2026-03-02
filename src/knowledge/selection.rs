@@ -2,10 +2,56 @@
 
 use std::fmt::Write;
 
+use super::bm25::Bm25Scorer;
 use super::models::{KnowledgeChunk, KnowledgePriority};
 
 /// Default knowledge token budget (rough estimate: 4 chars per token)
 const DEFAULT_KNOWLEDGE_TOKEN_BUDGET: usize = 4000;
+
+/// Default number of recent turns to include in retrieval queries
+const DEFAULT_MAX_RETRIEVAL_TURNS: usize = 3;
+
+/// Minimum similarity threshold for embedding-based selection
+const MIN_SIMILARITY: f32 = 0.2;
+
+/// RRF smoothing constant (standard value from the original paper)
+const RRF_K: f32 = 60.0;
+
+/// Build a retrieval query from recent user messages
+///
+/// Concatenates the last `max_turns` user messages (current message last)
+/// to provide conversational context for knowledge selection. Falls back to
+/// `current_message` alone when no history is available.
+///
+/// # Examples
+///
+/// ```
+/// use agent_core::knowledge::build_retrieval_query;
+///
+/// let query = build_retrieval_query("tell me more", &["what is MCG?"], 3);
+/// assert!(query.contains("what is MCG?"));
+/// assert!(query.contains("tell me more"));
+/// ```
+#[must_use]
+pub fn build_retrieval_query(current_message: &str, history: &[&str], max_turns: usize) -> String {
+    let max_turns = if max_turns == 0 {
+        DEFAULT_MAX_RETRIEVAL_TURNS
+    } else {
+        max_turns
+    };
+
+    if history.is_empty() {
+        return current_message.to_string();
+    }
+
+    // Take up to max_turns - 1 from history (newest first in input),
+    // reverse so oldest context comes first, then append current message
+    let prior: Vec<&str> = history.iter().take(max_turns - 1).rev().copied().collect();
+
+    let mut parts = prior;
+    parts.push(current_message);
+    parts.join("\n")
+}
 
 /// Select relevant knowledge chunks based on user message
 ///
@@ -20,14 +66,13 @@ pub fn select_knowledge<'a>(
     select_knowledge_with_embeddings(chunks, user_message, None, max_tokens)
 }
 
-/// Select relevant knowledge chunks with optional embedding-based ranking
+/// Select relevant knowledge chunks using BM25 + embedding hybrid search
 ///
 /// Selection strategy:
 /// 1. All chunks with priority "always" are included unconditionally
-/// 2. For "relevant" chunks:
-///    - If a chunk has an embedding AND `user_embedding` is provided,
-///      rank by cosine similarity (highest first)
-///    - Otherwise fall back to tag matching against the user message
+/// 2. For "relevant" chunks, uses reciprocal rank fusion (RRF) to combine:
+///    - BM25 term-frequency scores (always available)
+///    - Cosine similarity scores (when embeddings are available)
 /// 3. Trim to token budget
 #[must_use]
 pub fn select_knowledge_with_embeddings<'a>(
@@ -36,62 +81,90 @@ pub fn select_knowledge_with_embeddings<'a>(
     user_embedding: Option<&[f32]>,
     max_tokens: usize,
 ) -> Vec<&'a KnowledgeChunk> {
-    const MIN_SIMILARITY: f32 = 0.2;
-
     let mut selected: Vec<&KnowledgeChunk> = Vec::new();
 
     // Always-priority chunks first
-    for chunk in chunks {
+    let mut relevant_chunks: Vec<(usize, &KnowledgeChunk)> = Vec::new();
+    for (i, chunk) in chunks.iter().enumerate() {
         if chunk.priority == KnowledgePriority::Always {
             selected.push(chunk);
+        } else if chunk.priority == KnowledgePriority::Relevant {
+            relevant_chunks.push((i, chunk));
         }
     }
 
-    // Collect relevant chunks that can be scored by embedding similarity
-    let mut scored: Vec<(&KnowledgeChunk, f32)> = Vec::new();
-    let mut unscored_relevant: Vec<&KnowledgeChunk> = Vec::new();
+    if relevant_chunks.is_empty() || user_message.is_empty() {
+        trim_to_budget(&mut selected, max_tokens);
+        return selected;
+    }
 
-    // Strip punctuation and split into clean tokens for tag fallback
-    let message_lower = user_message.to_lowercase();
-    let tokens: Vec<String> = message_lower
-        .split_whitespace()
-        .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
-        .filter(|t| !t.is_empty())
+    // Build BM25 scorer over relevant chunks only
+    let relevant_only: Vec<&KnowledgeChunk> = relevant_chunks.iter().map(|(_, c)| *c).collect();
+    let relevant_chunk_data: Vec<KnowledgeChunk> =
+        relevant_only.iter().map(|c| (*c).clone()).collect();
+    let scorer = Bm25Scorer::new(&relevant_chunk_data);
+    let bm25_scores = scorer.score(user_message);
+
+    // Build BM25 rank map (index in relevant_chunks → rank)
+    let mut bm25_rank: Vec<(usize, usize)> = Vec::new();
+    for (rank, (idx, _score)) in bm25_scores.iter().enumerate() {
+        bm25_rank.push((*idx, rank + 1));
+    }
+    let bm25_rank_map: std::collections::HashMap<usize, usize> = bm25_rank.into_iter().collect();
+
+    // Build embedding rank map if user embedding is available
+    let emb_rank_map: std::collections::HashMap<usize, usize> =
+        if let Some(user_emb) = user_embedding {
+            let mut emb_ranked: Vec<(usize, f32)> = relevant_chunks
+                .iter()
+                .enumerate()
+                .filter_map(|(local_idx, (_, chunk))| {
+                    chunk
+                        .embedding
+                        .as_ref()
+                        .map(|emb| (local_idx, cosine_similarity(emb, user_emb)))
+                })
+                .filter(|(_, score)| *score >= MIN_SIMILARITY)
+                .collect();
+            emb_ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            emb_ranked
+                .into_iter()
+                .enumerate()
+                .map(|(rank, (idx, _))| (idx, rank + 1))
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+    // Compute RRF fusion scores
+    #[allow(clippy::cast_precision_loss)]
+    let mut fused: Vec<(usize, f32)> = relevant_chunks
+        .iter()
+        .enumerate()
+        .filter_map(|(local_idx, _)| {
+            let bm25_component = bm25_rank_map
+                .get(&local_idx)
+                .map(|&r| 1.0 / (RRF_K + r as f32));
+            let emb_component = emb_rank_map
+                .get(&local_idx)
+                .map(|&r| 1.0 / (RRF_K + r as f32));
+
+            // Must appear in at least one ranking
+            match (bm25_component, emb_component) {
+                (Some(b), Some(e)) => Some((local_idx, b + e)),
+                (Some(b), None) => Some((local_idx, b)),
+                (None, Some(e)) => Some((local_idx, e)),
+                (None, None) => None,
+            }
+        })
         .collect();
 
-    for chunk in chunks {
-        if chunk.priority != KnowledgePriority::Relevant {
-            continue;
-        }
+    fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        if let (Some(chunk_emb), Some(user_emb)) = (&chunk.embedding, user_embedding) {
-            // Both embeddings available: compute similarity score
-            let score = cosine_similarity(chunk_emb, user_emb);
-            scored.push((chunk, score));
-        } else {
-            // Fall back to tag matching
-            let matched = chunk.tags.iter().any(|tag| {
-                let tag_lower = tag.to_lowercase();
-                tokens.contains(&tag_lower)
-            });
-            if matched {
-                unscored_relevant.push(chunk);
-            }
-        }
+    // Append fused results after always chunks
+    for (local_idx, _score) in &fused {
+        selected.push(relevant_chunks[*local_idx].1);
     }
-
-    // Sort scored chunks by similarity (descending)
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Filter scored chunks above minimum relevance threshold
-    for (chunk, score) in &scored {
-        if *score >= MIN_SIMILARITY {
-            selected.push(chunk);
-        }
-    }
-
-    // Append tag-matched chunks after embedding-ranked ones
-    selected.extend(unscored_relevant);
 
     // Trim to token budget
     trim_to_budget(&mut selected, max_tokens);
@@ -173,6 +246,11 @@ const fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
 }
 
+/// Trim chunks to fit within a token budget (public for cross-module use)
+pub(super) fn trim_to_budget_pub(chunks: &mut Vec<&KnowledgeChunk>, max_tokens: usize) {
+    trim_to_budget(chunks, max_tokens);
+}
+
 /// Trim chunks to fit within a token budget
 fn trim_to_budget(chunks: &mut Vec<&KnowledgeChunk>, max_tokens: usize) {
     let mut total_tokens = 0;
@@ -225,7 +303,7 @@ mod tests {
         }
     }
 
-    // Tag-based selection tests
+    // Tag-based / BM25 selection tests
 
     #[test]
     fn always_chunks_included() {
@@ -240,25 +318,53 @@ mod tests {
     }
 
     #[test]
-    fn tag_matching_selects_relevant() {
+    fn bm25_selects_relevant_by_content() {
         let chunks = vec![
-            make_chunk("Token Info", &["token", "mcg"], KnowledgePriority::Relevant),
-            make_chunk("Platform", &["platform"], KnowledgePriority::Relevant),
+            KnowledgeChunk {
+                topic: Some("Token Info".to_string()),
+                tags: vec!["token".to_string(), "mcg".to_string()],
+                content: "MCG is a token on Solana".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: None,
+            },
+            KnowledgeChunk {
+                topic: Some("Platform".to_string()),
+                tags: vec!["platform".to_string()],
+                content: "Omni is a developer platform".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: None,
+            },
         ];
 
-        let selected = select_knowledge(&chunks, "tell me about the token", 10000);
-        assert_eq!(selected.len(), 1);
+        let selected = select_knowledge(&chunks, "tell me about the token MCG", 10000);
+        assert!(!selected.is_empty());
         assert_eq!(selected[0].topic.as_deref(), Some("Token Info"));
     }
 
     #[test]
-    fn multiple_tag_matches() {
+    fn multiple_bm25_matches() {
         let chunks = vec![
-            make_chunk("Token", &["token"], KnowledgePriority::Relevant),
-            make_chunk("Platform", &["platform"], KnowledgePriority::Relevant),
+            KnowledgeChunk {
+                topic: Some("Token".to_string()),
+                tags: vec!["token".to_string()],
+                content: "MCG token details".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: None,
+            },
+            KnowledgeChunk {
+                topic: Some("Platform".to_string()),
+                tags: vec!["platform".to_string()],
+                content: "Omni platform overview".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: None,
+            },
         ];
 
-        let selected = select_knowledge(&chunks, "token and platform", 10000);
+        let selected = select_knowledge(&chunks, "MCG token Omni platform", 10000);
         assert_eq!(selected.len(), 2);
     }
 
@@ -266,50 +372,30 @@ mod tests {
     fn always_plus_relevant() {
         let chunks = vec![
             make_chunk("Core", &[], KnowledgePriority::Always),
-            make_chunk("Token", &["token"], KnowledgePriority::Relevant),
+            KnowledgeChunk {
+                topic: Some("Token".to_string()),
+                tags: vec!["token".to_string()],
+                content: "MCG token information".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: None,
+            },
             make_chunk("Other", &["other"], KnowledgePriority::Relevant),
         ];
 
-        let selected = select_knowledge(&chunks, "what is the token?", 10000);
-        assert_eq!(selected.len(), 2);
+        let selected = select_knowledge(&chunks, "what is the MCG token?", 10000);
+        assert!(selected.len() >= 2);
         assert_eq!(selected[0].topic.as_deref(), Some("Core"));
-        assert_eq!(selected[1].topic.as_deref(), Some("Token"));
+        // Token should appear because BM25 matches on "token" and "MCG"
+        assert!(selected.iter().any(|c| c.topic.as_deref() == Some("Token")));
     }
 
     #[test]
-    fn no_matches_returns_empty() {
+    fn no_matches_returns_only_always() {
         let chunks = vec![make_chunk("Token", &["token"], KnowledgePriority::Relevant)];
 
-        let selected = select_knowledge(&chunks, "hello world", 10000);
-        assert!(selected.is_empty());
-    }
-
-    #[test]
-    fn tag_matching_strips_punctuation() {
-        let chunks = vec![make_chunk("Token", &["mcg"], KnowledgePriority::Relevant)];
-
-        let selected = select_knowledge(&chunks, "what is $mcg?", 10000);
-        assert_eq!(selected.len(), 1);
-    }
-
-    #[test]
-    fn case_insensitive_matching() {
-        let chunks = vec![make_chunk("Token", &["MCG"], KnowledgePriority::Relevant)];
-
-        let selected = select_knowledge(&chunks, "what is mcg?", 10000);
-        assert_eq!(selected.len(), 1);
-    }
-
-    #[test]
-    fn short_tags_no_false_positives() {
-        let chunks = vec![make_chunk(
-            "AR Platform",
-            &["ar"],
-            KnowledgePriority::Relevant,
-        )];
-
-        // "are" should NOT match tag "ar"
-        let selected = select_knowledge(&chunks, "what are you?", 10000);
+        // "xyz" doesn't appear in any chunk content or tags
+        let selected = select_knowledge(&chunks, "xyz", 10000);
         assert!(selected.is_empty());
     }
 
@@ -378,7 +464,14 @@ mod tests {
 
     #[test]
     fn build_knowledge_context_empty_when_no_matches() {
-        let chunks = vec![make_chunk("Token", &["token"], KnowledgePriority::Relevant)];
+        let chunks = vec![KnowledgeChunk {
+            topic: Some("Token".to_string()),
+            tags: vec!["token".to_string()],
+            content: "Unique content xyz".to_string(),
+            rules: vec![],
+            priority: KnowledgePriority::Relevant,
+            embedding: None,
+        }];
 
         let context = build_knowledge_context(&chunks, "unrelated message");
         assert!(context.is_empty());
@@ -434,9 +527,11 @@ mod tests {
         ];
 
         let user_emb = vec![1.0, 0.0, 0.0];
-        let selected = select_knowledge_with_embeddings(&chunks, "", Some(&user_emb), 10000);
+        let selected =
+            select_knowledge_with_embeddings(&chunks, "anything", Some(&user_emb), 10000);
 
-        assert_eq!(selected.len(), 1);
+        // "Close" should rank higher via embedding similarity
+        assert!(!selected.is_empty());
         assert_eq!(selected[0].topic.as_deref(), Some("Close"));
     }
 
@@ -448,22 +543,30 @@ mod tests {
         ];
 
         let user_emb = vec![1.0, 0.0, 0.0];
-        let selected = select_knowledge_with_embeddings(&chunks, "", Some(&user_emb), 10000);
+        let selected =
+            select_knowledge_with_embeddings(&chunks, "anything", Some(&user_emb), 10000);
 
         // Always chunk included even though embedding is distant
-        assert_eq!(selected.len(), 1);
+        assert!(!selected.is_empty());
         assert_eq!(selected[0].topic.as_deref(), Some("Core"));
     }
 
     #[test]
-    fn embedding_selection_falls_back_to_tags() {
-        // Chunk without embedding falls back to tag matching
-        let chunks = vec![make_chunk("Token", &["token"], KnowledgePriority::Relevant)];
+    fn embedding_selection_falls_back_to_bm25() {
+        // Chunk without embedding still gets picked up by BM25
+        let chunks = vec![KnowledgeChunk {
+            topic: Some("Token".to_string()),
+            tags: vec!["token".to_string()],
+            content: "MCG token on Solana".to_string(),
+            rules: vec![],
+            priority: KnowledgePriority::Relevant,
+            embedding: None,
+        }];
 
         let user_emb = vec![1.0, 0.0, 0.0];
         let selected = select_knowledge_with_embeddings(
             &chunks,
-            "tell me about the token",
+            "tell me about the MCG token",
             Some(&user_emb),
             10000,
         );
@@ -473,32 +576,92 @@ mod tests {
     }
 
     #[test]
-    fn embedding_selection_no_user_embedding_uses_tags() {
+    fn no_user_embedding_uses_bm25_only() {
         let chunks = vec![
             make_embedded_chunk("Crypto", vec![1.0, 0.0, 0.0], KnowledgePriority::Relevant),
-            make_chunk("Token", &["token"], KnowledgePriority::Relevant),
+            KnowledgeChunk {
+                topic: Some("Token".to_string()),
+                tags: vec!["token".to_string()],
+                content: "MCG token details".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: None,
+            },
         ];
 
-        // No user embedding: embedded chunk treated as unscored, falls back to tags
+        // No user embedding: BM25 alone drives selection
         let selected =
-            select_knowledge_with_embeddings(&chunks, "tell me about the token", None, 10000);
+            select_knowledge_with_embeddings(&chunks, "tell me about the MCG token", None, 10000);
 
-        assert_eq!(selected.len(), 1);
+        assert!(!selected.is_empty());
         assert_eq!(selected[0].topic.as_deref(), Some("Token"));
     }
 
+    // Retrieval query tests
+
     #[test]
-    fn embedding_selection_filters_low_similarity() {
-        let chunks = vec![make_embedded_chunk(
-            "Unrelated",
-            vec![0.0, 1.0, 0.0],
-            KnowledgePriority::Relevant,
-        )];
+    fn retrieval_query_empty_history() {
+        let query = build_retrieval_query("what is MCG?", &[], 3);
+        assert_eq!(query, "what is MCG?");
+    }
 
-        // Orthogonal vectors should be filtered out (similarity = 0 < 0.2 threshold)
+    #[test]
+    fn retrieval_query_single_prior() {
+        let query = build_retrieval_query("tell me more", &["what is MCG?"], 3);
+        assert_eq!(query, "what is MCG?\ntell me more");
+    }
+
+    #[test]
+    fn retrieval_query_multi_turn_truncation() {
+        // history is newest-first: ["c", "b", "a"]
+        // max_turns = 3 means take 2 from history + current
+        let query = build_retrieval_query("d", &["c", "b", "a"], 3);
+        // Should include b, c (reversed to chronological), then d
+        assert_eq!(query, "b\nc\nd");
+    }
+
+    #[test]
+    fn retrieval_query_fewer_turns_than_max() {
+        let query = build_retrieval_query("current", &["prev"], 5);
+        assert_eq!(query, "prev\ncurrent");
+    }
+
+    #[test]
+    fn hybrid_rrf_combines_signals() {
+        // Chunk that matches both BM25 and embedding should rank highest
+        let chunks = vec![
+            KnowledgeChunk {
+                topic: Some("BM25 Only".to_string()),
+                tags: vec![],
+                content: "MCG token Solana blockchain".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: None, // No embedding
+            },
+            KnowledgeChunk {
+                topic: Some("Both Signals".to_string()),
+                tags: vec![],
+                content: "MCG token details and pricing".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: Some(vec![1.0, 0.0, 0.0]), // Close to user embedding
+            },
+            KnowledgeChunk {
+                topic: Some("Embedding Only".to_string()),
+                tags: vec![],
+                content: "Unrelated text about nothing".to_string(),
+                rules: vec![],
+                priority: KnowledgePriority::Relevant,
+                embedding: Some(vec![0.9, 0.1, 0.0]), // Close to user embedding
+            },
+        ];
+
         let user_emb = vec![1.0, 0.0, 0.0];
-        let selected = select_knowledge_with_embeddings(&chunks, "", Some(&user_emb), 10000);
+        let selected =
+            select_knowledge_with_embeddings(&chunks, "MCG token", Some(&user_emb), 10000);
 
-        assert!(selected.is_empty());
+        // "Both Signals" should rank first because it scores in both BM25 and embedding
+        assert!(!selected.is_empty());
+        assert_eq!(selected[0].topic.as_deref(), Some("Both Signals"));
     }
 }

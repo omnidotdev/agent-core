@@ -79,6 +79,10 @@ pub struct PackEmbeddings {
 
     /// Map from chunk index (as string) to embedding vector
     pub vectors: HashMap<String, Vec<f32>>,
+
+    /// Whether embeddings include contextual prefixes
+    #[serde(default)]
+    pub contextual: bool,
 }
 
 /// A knowledge pack published to Manifold
