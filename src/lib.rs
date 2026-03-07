@@ -9,3 +9,6 @@ pub mod provider;
 pub mod providers;
 pub mod registry;
 pub mod types;
+
+#[cfg(feature = "mcp")]
+pub mod mcp;
