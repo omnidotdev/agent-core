@@ -12,3 +12,6 @@ pub mod types;
 
 #[cfg(feature = "mcp")]
 pub mod mcp;
+
+#[cfg(feature = "tools")]
+pub mod tools;
