@@ -10,6 +10,9 @@ pub mod providers;
 pub mod registry;
 pub mod types;
 
+#[cfg(feature = "memory")]
+pub mod memory;
+
 #[cfg(feature = "mcp")]
 pub mod mcp;
 

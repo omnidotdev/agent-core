@@ -9,6 +9,7 @@ rust-version = "1.86"
 [features]
 default = []
 mcp = []
+memory = ["ulid"]
 tools = ["sha2"]
 web = ["readability", "url"]
 
@@ -26,6 +27,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["sync", "process", "io-util", "time"] }
 uuid = { version = "1", features = ["v4"] }
 sha2 = { version = "0.10", optional = true }
+ulid = { version = "1", optional = true }
 readability = { version = "0.3", optional = true }
 url = { version = "2", optional = true }
 
