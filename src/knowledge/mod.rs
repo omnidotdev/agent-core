@@ -4,7 +4,7 @@
 //! chunk selection, and text embedding used by both the CLI and
 //! Beacon gateway
 
-mod bm25;
+pub mod bm25;
 pub mod condenser;
 pub mod embedder;
 mod models;
@@ -18,6 +18,7 @@ pub use models::{
     KnowledgeChunk, KnowledgeConfig, KnowledgePack, KnowledgePackRef, KnowledgePriority,
     PackEmbeddings,
 };
+pub use bm25::Bm25Scorer;
 pub use reranker::{ApiReranker, Reranker, RerankerError, select_knowledge_reranked};
 pub use resolver::{KnowledgePackResolver, ResolverError, hydrate_embeddings, resolve_and_merge};
 pub use selection::{

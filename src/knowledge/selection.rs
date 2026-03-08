@@ -99,10 +99,11 @@ pub fn select_knowledge_with_embeddings<'a>(
     }
 
     // Build BM25 scorer over relevant chunks only
-    let relevant_only: Vec<&KnowledgeChunk> = relevant_chunks.iter().map(|(_, c)| *c).collect();
-    let relevant_chunk_data: Vec<KnowledgeChunk> =
-        relevant_only.iter().map(|c| (*c).clone()).collect();
-    let scorer = Bm25Scorer::new(&relevant_chunk_data);
+    let documents: Vec<String> = relevant_chunks
+        .iter()
+        .map(|(_, c)| chunk_to_searchable_text(c))
+        .collect();
+    let scorer = Bm25Scorer::new(&documents);
     let bm25_scores = scorer.score(user_message);
 
     // Build BM25 rank map (index in relevant_chunks → rank)
@@ -271,6 +272,23 @@ fn trim_to_budget(chunks: &mut Vec<&KnowledgeChunk>, max_tokens: usize) {
     }
 
     chunks.truncate(keep);
+}
+
+/// Convert a knowledge chunk to searchable text for BM25 scoring
+fn chunk_to_searchable_text(chunk: &KnowledgeChunk) -> String {
+    let mut text = chunk.content.clone();
+
+    if let Some(ref topic) = chunk.topic {
+        text.push(' ');
+        text.push_str(topic);
+    }
+
+    for tag in &chunk.tags {
+        text.push(' ');
+        text.push_str(tag);
+    }
+
+    text
 }
 
 #[cfg(test)]

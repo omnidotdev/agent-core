@@ -1,11 +1,9 @@
-//! BM25 relevance scorer for knowledge chunks
+//! BM25 relevance scorer
 //!
-//! Implements Okapi BM25 (k1=1.2, b=0.75) for term-frequency scoring
-//! over a small in-memory corpus of knowledge chunks
+//! Implements Okapi BM25 (k1=1.2, b=0.75) for ranked keyword search
+//! over an in-memory corpus of documents
 
-use std::collections::HashMap;
-
-use super::models::KnowledgeChunk;
+use std::collections::{HashMap, HashSet};
 
 /// BM25 tuning parameter: term frequency saturation
 const K1: f32 = 1.2;
@@ -13,7 +11,7 @@ const K1: f32 = 1.2;
 /// BM25 tuning parameter: document length normalization
 const B: f32 = 0.75;
 
-/// BM25 relevance scorer for knowledge chunks
+/// BM25 relevance scorer for an in-memory document corpus
 pub struct Bm25Scorer {
     /// IDF values for each term in the corpus
     idf: HashMap<String, f32>,
@@ -30,25 +28,25 @@ struct DocStats {
 }
 
 impl Bm25Scorer {
-    /// Build a scorer from a set of knowledge chunks
+    /// Build a scorer from document strings
     ///
-    /// Tokenizes each chunk's content, topic, and tags to build the
-    /// term-frequency index and IDF table
+    /// Each entry in `documents` is the searchable text for one item
+    /// (e.g. content + tags concatenated).
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
-    pub fn new(chunks: &[KnowledgeChunk]) -> Self {
-        let n = chunks.len() as f32;
+    pub fn new(documents: &[String]) -> Self {
+        let n = documents.len() as f32;
         let mut doc_freq: HashMap<String, u32> = HashMap::new();
-        let mut docs = Vec::with_capacity(chunks.len());
+        let mut docs = Vec::with_capacity(documents.len());
         let mut total_len: u32 = 0;
 
-        for chunk in chunks {
-            let tokens = tokenize_chunk(chunk);
+        for doc in documents {
+            let tokens = tokenize(doc);
             let len = u32::try_from(tokens.len()).unwrap_or(u32::MAX);
             total_len = total_len.saturating_add(len);
 
             let mut term_freq: HashMap<String, u32> = HashMap::new();
-            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut seen = HashSet::new();
 
             for token in &tokens {
                 *term_freq.entry(token.clone()).or_insert(0) += 1;
@@ -69,7 +67,6 @@ impl Bm25Scorer {
             }
         };
 
-        // Compute IDF: log((N - df + 0.5) / (df + 0.5) + 1)
         let mut idf = HashMap::new();
         for (term, df) in &doc_freq {
             #[allow(clippy::cast_precision_loss)]
@@ -81,9 +78,9 @@ impl Bm25Scorer {
         Self { idf, docs, avg_dl }
     }
 
-    /// Score a query against all chunks
+    /// Score a query against all documents
     ///
-    /// Returns `(chunk_index, score)` pairs sorted by score descending.
+    /// Returns `(index, score)` pairs sorted by score descending.
     /// Only returns entries with a positive score.
     #[must_use]
     pub fn score(&self, query: &str) -> Vec<(usize, f32)> {
@@ -120,7 +117,6 @@ impl Bm25Scorer {
             let tf = *doc.term_freq.get(token).unwrap_or(&0) as f32;
             let dl = doc.len as f32;
 
-            // BM25 formula: IDF * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl/avgdl))
             let numerator = tf * (K1 + 1.0);
             let denominator = K1.mul_add(1.0 - B + B * dl / self.avg_dl, tf);
             score += idf * numerator / denominator;
@@ -128,21 +124,6 @@ impl Bm25Scorer {
 
         score
     }
-}
-
-/// Tokenize a knowledge chunk for indexing
-fn tokenize_chunk(chunk: &KnowledgeChunk) -> Vec<String> {
-    let mut tokens = tokenize(&chunk.content);
-
-    if let Some(ref topic) = chunk.topic {
-        tokens.extend(tokenize(topic));
-    }
-
-    for tag in &chunk.tags {
-        tokens.extend(tokenize(tag));
-    }
-
-    tokens
 }
 
 /// Tokenize text: lowercase, strip non-alphanumeric, filter empty
@@ -161,28 +142,15 @@ fn tokenize(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::knowledge::models::KnowledgePriority;
-
-    fn make_chunk(topic: &str, tags: &[&str], content: &str) -> KnowledgeChunk {
-        KnowledgeChunk {
-            topic: Some(topic.to_string()),
-            tags: tags.iter().map(|t| t.to_string()).collect(),
-            content: content.to_string(),
-            rules: vec![],
-            priority: KnowledgePriority::Relevant,
-            embedding: None,
-        }
-    }
 
     #[test]
     fn single_term_scoring() {
-        let chunks = vec![
-            make_chunk("Solana", &[], "MCG is a token on Solana"),
-            make_chunk("Ethereum", &[], "ETH is the native currency of Ethereum"),
+        let docs = vec![
+            "User prefers dark mode".to_string(),
+            "Works at Acme Corp".to_string(),
         ];
-
-        let scorer = Bm25Scorer::new(&chunks);
-        let results = scorer.score("Solana");
+        let scorer = Bm25Scorer::new(&docs);
+        let results = scorer.score("dark");
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, 0);
@@ -190,63 +158,53 @@ mod tests {
     }
 
     #[test]
-    fn multi_term_scoring() {
-        let chunks = vec![
-            make_chunk("Token", &["mcg"], "MCG is a Solana token"),
-            make_chunk("Platform", &[], "Omni is a platform for developers"),
-            make_chunk("Both", &[], "MCG token on the Omni platform"),
+    fn multi_term_ranking() {
+        let docs = vec![
+            "User prefers dark mode".to_string(),
+            "Works at Acme Corp in dark office".to_string(),
+            "Acme Corp uses dark mode everywhere".to_string(),
         ];
+        let scorer = Bm25Scorer::new(&docs);
+        let results = scorer.score("dark mode Acme");
 
-        let scorer = Bm25Scorer::new(&chunks);
-        let results = scorer.score("MCG Omni");
-
-        // "Both" chunk should score highest (has both terms)
         assert!(!results.is_empty());
         assert_eq!(results[0].0, 2);
     }
 
     #[test]
-    fn empty_query_returns_empty() {
-        let chunks = vec![make_chunk("Token", &[], "MCG is a token")];
-        let scorer = Bm25Scorer::new(&chunks);
-        let results = scorer.score("");
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn idf_weights_rare_terms_higher() {
-        let chunks = vec![
-            make_chunk("A", &[], "the common word appears here"),
-            make_chunk("B", &[], "the common word appears here too"),
-            make_chunk("C", &[], "rare unique special MCG token"),
-        ];
-
-        let scorer = Bm25Scorer::new(&chunks);
-
-        // "the" appears in 2 docs, "mcg" in 1 — mcg should have higher IDF
-        let the_idf = scorer.idf.get("the").copied().unwrap_or(0.0);
-        let mcg_idf = scorer.idf.get("mcg").copied().unwrap_or(0.0);
-        assert!(mcg_idf > the_idf);
-    }
-
-    #[test]
-    fn tags_contribute_to_scoring() {
-        let chunks = vec![
-            make_chunk("Info", &["solana", "token"], "General information"),
-            make_chunk("Other", &[], "Unrelated content about nothing"),
-        ];
-
-        let scorer = Bm25Scorer::new(&chunks);
-        let results = scorer.score("solana");
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, 0);
+    fn empty_query() {
+        let docs = vec!["something".to_string()];
+        let scorer = Bm25Scorer::new(&docs);
+        assert!(scorer.score("").is_empty());
     }
 
     #[test]
     fn empty_corpus() {
         let scorer = Bm25Scorer::new(&[]);
-        let results = scorer.score("anything");
-        assert!(results.is_empty());
+        assert!(scorer.score("anything").is_empty());
+    }
+
+    #[test]
+    fn no_match() {
+        let docs = vec!["User prefers vim".to_string()];
+        let scorer = Bm25Scorer::new(&docs);
+        assert!(scorer.score("emacs").is_empty());
+    }
+
+    #[test]
+    fn rare_terms_score_higher() {
+        let docs = vec![
+            "the common word appears here".to_string(),
+            "the common word appears here too".to_string(),
+            "rare unique MCG token".to_string(),
+        ];
+        let scorer = Bm25Scorer::new(&docs);
+
+        let common_results = scorer.score("the");
+        let rare_results = scorer.score("mcg");
+
+        assert!(!common_results.is_empty());
+        assert!(!rare_results.is_empty());
+        assert!(rare_results[0].1 > common_results[0].1);
     }
 }
