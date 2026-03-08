@@ -16,5 +16,8 @@ pub mod memory;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 
+#[cfg(feature = "skills")]
+pub mod skills;
+
 #[cfg(feature = "tools")]
 pub mod tools;
