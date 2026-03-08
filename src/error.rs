@@ -38,6 +38,10 @@ pub enum AgentError {
     /// Agent entered an infinite loop.
     #[error("loop detected: {0}")]
     LoopDetected(String),
+
+    /// Web fetch error
+    #[error("web fetch error: {0}")]
+    WebFetch(String),
 }
 
 /// Result type for agent operations.
