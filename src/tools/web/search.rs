@@ -189,6 +189,51 @@ impl WebSearchTool {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::tools::ToolProvider for WebSearchTool {
+    fn definitions(&self) -> Vec<crate::types::Tool> {
+        vec![crate::types::Tool {
+            name: "WebSearch".to_string(),
+            description: "Search the web and return results with titles, URLs, and snippets."
+                .to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results (default: 10)"
+                    }
+                },
+                "required": ["query"]
+            }),
+        }]
+    }
+
+    async fn execute(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+        if name != "WebSearch" {
+            anyhow::bail!("unknown tool: {name}");
+        }
+
+        let args: serde_json::Value = serde_json::from_str(arguments)?;
+        let query = args["query"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing 'query' argument"))?;
+        let limit = args["limit"].as_u64().map(|n| n as usize);
+
+        let results = self.search(query, limit).await?;
+
+        Ok(serde_json::to_string(&results)?)
+    }
+
+    fn kind(&self, _name: &str) -> crate::tools::ToolKind {
+        crate::tools::ToolKind::Read
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

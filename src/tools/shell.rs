@@ -147,6 +147,50 @@ impl ShellTool {
     }
 }
 
+#[async_trait::async_trait]
+impl super::ToolProvider for ShellTool {
+    fn definitions(&self) -> Vec<crate::types::Tool> {
+        vec![crate::types::Tool {
+            name: "Bash".to_string(),
+            description: "Execute a shell command and return its output. Use for system commands, file operations, and running scripts.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Timeout in seconds (default: 120)"
+                    }
+                },
+                "required": ["command"]
+            }),
+        }]
+    }
+
+    async fn execute(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+        if name != "Bash" {
+            anyhow::bail!("unknown tool: {name}");
+        }
+
+        let args: serde_json::Value = serde_json::from_str(arguments)?;
+        let command = args["command"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing 'command' argument"))?;
+        let timeout = args["timeout"].as_u64();
+
+        let output = Self::execute(self, command, timeout).await?;
+
+        Ok(serde_json::to_string(&output)?)
+    }
+
+    fn kind(&self, _name: &str) -> super::ToolKind {
+        super::ToolKind::Mutate
+    }
+}
+
 impl Default for ShellTool {
     fn default() -> Self {
         let home = std::env::var("HOME").map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from);

@@ -249,6 +249,56 @@ impl WebFetchTool {
     }
 }
 
+#[async_trait::async_trait]
+impl crate::tools::ToolProvider for WebFetchTool {
+    fn definitions(&self) -> Vec<crate::types::Tool> {
+        vec![crate::types::Tool {
+            name: "WebFetch".to_string(),
+            description: "Fetch a URL and return its contents. Includes SSRF protection against private/internal IP addresses.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to fetch"
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method (default: GET)",
+                        "enum": ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"]
+                    }
+                },
+                "required": ["url"]
+            }),
+        }]
+    }
+
+    async fn execute(&self, name: &str, arguments: &str) -> anyhow::Result<String> {
+        if name != "WebFetch" {
+            anyhow::bail!("unknown tool: {name}");
+        }
+
+        let args: serde_json::Value = serde_json::from_str(arguments)?;
+        let url = args["url"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing 'url' argument"))?;
+        let method = args["method"].as_str();
+
+        let response = self.fetch(url, method).await?;
+
+        Ok(serde_json::json!({
+            "status": response.status,
+            "url": response.url,
+            "body": response.body,
+        })
+        .to_string())
+    }
+
+    fn kind(&self, _name: &str) -> crate::tools::ToolKind {
+        crate::tools::ToolKind::Read
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
