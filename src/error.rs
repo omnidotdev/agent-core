@@ -46,6 +46,11 @@ pub enum AgentError {
     /// Readability extraction error
     #[error("readability error: {0}")]
     Readability(String),
+
+    /// Browser automation error
+    #[cfg(feature = "browser")]
+    #[error("browser error: {0}")]
+    Browser(#[from] crate::tools::browser::BrowserError),
 }
 
 /// Result type for agent operations.

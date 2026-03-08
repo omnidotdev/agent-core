@@ -12,6 +12,7 @@ mcp = []
 memory = ["ulid"]
 skills = []
 tools = ["sha2"]
+browser = ["chromiumoxide", "tools"]
 web = ["readability", "url"]
 
 [dependencies]
@@ -31,6 +32,7 @@ sha2 = { version = "0.10", optional = true }
 ulid = { version = "1", optional = true }
 readability = { version = "0.3", optional = true }
 url = { version = "2", optional = true }
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"], optional = true }
 
 # HTTP client (for provider implementations)
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "stream", "rustls"] }
