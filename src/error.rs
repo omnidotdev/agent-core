@@ -42,6 +42,10 @@ pub enum AgentError {
     /// Web fetch error
     #[error("web fetch error: {0}")]
     WebFetch(String),
+
+    /// Readability extraction error
+    #[error("readability error: {0}")]
+    Readability(String),
 }
 
 /// Result type for agent operations.
