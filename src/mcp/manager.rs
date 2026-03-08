@@ -65,7 +65,9 @@ impl McpServerManager {
             for tool in &tools {
                 let scoped = format!("mcp_{}/{}", name, tool.name);
                 routes.insert(scoped, name.clone());
-                routes.entry(tool.name.clone()).or_insert_with(|| name.clone());
+                routes
+                    .entry(tool.name.clone())
+                    .or_insert_with(|| name.clone());
             }
         }
 
@@ -88,8 +90,7 @@ impl McpServerManager {
 
     /// Stop all servers
     pub async fn stop_all(&self) {
-        let servers: Vec<(String, Arc<McpClient>)> =
-            self.servers.lock().await.drain().collect();
+        let servers: Vec<(String, Arc<McpClient>)> = self.servers.lock().await.drain().collect();
 
         for (name, client) in servers {
             client.stop().await;

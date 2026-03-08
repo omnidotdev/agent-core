@@ -3,5 +3,5 @@
 pub mod store;
 pub mod types;
 
-pub use store::{format_for_prompt, MemoryStore};
+pub use store::{MemoryStore, format_for_prompt};
 pub use types::{MemoryCategory, MemoryItem};

@@ -117,8 +117,7 @@ impl ShellTool {
         };
 
         let result =
-            tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
-                .await;
+            tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output()).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -150,8 +149,7 @@ impl ShellTool {
 
 impl Default for ShellTool {
     fn default() -> Self {
-        let home = std::env::var("HOME")
-            .map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from);
+        let home = std::env::var("HOME").map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from);
 
         let extra_path = vec![
             home.join(".bun/bin"),
