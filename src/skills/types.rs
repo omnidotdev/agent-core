@@ -31,7 +31,8 @@ pub struct SkillMetadata {
 }
 
 /// Where a skill was discovered from
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SkillSource {
     /// Local filesystem
     Local,
