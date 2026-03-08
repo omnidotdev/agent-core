@@ -42,7 +42,7 @@ pub struct McpToolResult {
 // --- JSON-RPC types for the MCP protocol ---
 
 #[derive(Debug, Serialize)]
-pub(crate) struct JsonRpcRequest {
+pub struct JsonRpcRequest {
     pub jsonrpc: &'static str,
     pub id: u64,
     pub method: String,
@@ -51,14 +51,14 @@ pub(crate) struct JsonRpcRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct JsonRpcResponse {
+pub struct JsonRpcResponse {
     pub id: Option<u64>,
     pub result: Option<serde_json::Value>,
     pub error: Option<JsonRpcError>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct JsonRpcError {
+pub struct JsonRpcError {
     pub code: i64,
     pub message: String,
 }
@@ -67,7 +67,7 @@ pub(crate) struct JsonRpcError {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
-pub(crate) struct InitializeResult {
+pub struct InitializeResult {
     pub protocol_version: String,
     pub server_info: Option<ServerInfo>,
     pub capabilities: Option<serde_json::Value>,
@@ -75,21 +75,21 @@ pub(crate) struct InitializeResult {
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-pub(crate) struct ServerInfo {
+pub struct ServerInfo {
     pub name: String,
     pub version: Option<String>,
 }
 
 /// MCP `tools/list` result
 #[derive(Debug, Deserialize)]
-pub(crate) struct ToolsListResult {
+pub struct ToolsListResult {
     pub tools: Vec<McpToolDef>,
 }
 
 /// A single tool from `tools/list`
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct McpToolDef {
+pub struct McpToolDef {
     pub name: String,
     pub description: Option<String>,
     pub input_schema: serde_json::Value,
@@ -98,7 +98,7 @@ pub(crate) struct McpToolDef {
 /// MCP `tools/call` result
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ToolCallResult {
+pub struct ToolCallResult {
     pub content: Vec<ToolContent>,
     #[serde(default)]
     pub is_error: bool,
@@ -107,7 +107,7 @@ pub(crate) struct ToolCallResult {
 /// Content block in a tool call result
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub(crate) enum ToolContent {
+pub enum ToolContent {
     Text { text: String },
     #[serde(other)]
     Other,

@@ -37,11 +37,12 @@ pub trait MemoryStore: Send + Sync {
 /// Format memories for system prompt injection.
 #[must_use]
 pub fn format_for_prompt(items: &[MemoryItem]) -> String {
+    use std::fmt::Write;
+
     if items.is_empty() {
         return String::new();
     }
 
-    use std::fmt::Write;
     let mut output = String::from("<memory>\n");
     output.push_str("The following are facts learned about this project and user:\n\n");
 

@@ -208,7 +208,8 @@ impl McpClient {
     pub async fn stop(&self) {
         let _ = self.stdin.lock().await.take();
 
-        if let Some(mut child) = self.child.lock().await.take() {
+        let child = self.child.lock().await.take();
+        if let Some(mut child) = child {
             tokio::select! {
                 _ = child.wait() => {}
                 () = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
@@ -280,7 +281,7 @@ impl McpClient {
         let msg = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
-            "params": params.unwrap_or(serde_json::json!({}))
+            "params": params.unwrap_or_else(|| serde_json::json!({}))
         });
 
         let mut line = serde_json::to_string(&msg).map_err(|e| format!("serialize error: {e}"))?;

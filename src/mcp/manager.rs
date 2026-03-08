@@ -65,7 +65,7 @@ impl McpServerManager {
             for tool in &tools {
                 let scoped = format!("mcp_{}/{}", name, tool.name);
                 routes.insert(scoped, name.clone());
-                routes.entry(tool.name.clone()).or_insert(name.clone());
+                routes.entry(tool.name.clone()).or_insert_with(|| name.clone());
             }
         }
 

@@ -54,7 +54,7 @@ pub struct ShellTool {
 impl ShellTool {
     /// Create a new shell tool with the given working directory and extra PATH entries.
     #[must_use]
-    pub fn new(working_dir: PathBuf, extra_path: Vec<PathBuf>) -> Self {
+    pub const fn new(working_dir: PathBuf, extra_path: Vec<PathBuf>) -> Self {
         Self {
             working_dir,
             extra_path,
@@ -151,8 +151,7 @@ impl ShellTool {
 impl Default for ShellTool {
     fn default() -> Self {
         let home = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp"));
+            .map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from);
 
         let extra_path = vec![
             home.join(".bun/bin"),
