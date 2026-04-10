@@ -2,9 +2,15 @@
 name = "agent-core"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
+authors = ["Omni <team@omni.dev>"]
 description = "Reusable AI agent library for Omni"
+license = "Apache-2.0"
+repository = "https://github.com/omnidotdev/agent-core"
+homepage = "https://omni.dev"
+readme = "README.md"
 rust-version = "1.86"
+keywords = ["ai", "agent", "llm"]
+categories = ["api-bindings"]
 
 [features]
 default = []
