@@ -235,6 +235,7 @@ fn convert_tools(tools: &[Tool]) -> Vec<LlmTool> {
                 description: t.description.clone(),
                 parameters: t.input_schema.clone(),
             },
+            cache_control: None,
         })
         .collect()
 }
