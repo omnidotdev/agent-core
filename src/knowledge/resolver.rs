@@ -301,6 +301,7 @@ fn parse_pack_ref(pack_ref: &str) -> Result<(&str, &str)> {
 
     match parts.as_slice() {
         [namespace, "knowledge", pack_name] => Ok((namespace, pack_name)),
+        #[allow(clippy::literal_string_with_formatting_args)]
         _ => Err(ResolverError::InvalidRef(format!(
             "expected @{{namespace}}/knowledge/{{pack_name}}, got: {pack_ref}"
         ))),

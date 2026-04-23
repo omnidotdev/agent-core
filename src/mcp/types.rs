@@ -2,19 +2,36 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Transport mechanism for connecting to an MCP server
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum McpTransport {
+    /// Spawn a subprocess and communicate via stdin/stdout JSON-RPC
+    Stdio {
+        /// Command to execute (e.g. "npx", "uvx", "node")
+        command: String,
+        /// Arguments to the command
+        #[serde(default)]
+        args: Vec<String>,
+        /// Environment variables to set
+        #[serde(default)]
+        env: std::collections::HashMap<String, String>,
+    },
+    /// Connect to an HTTP endpoint using Streamable HTTP transport
+    Http {
+        /// Full URL of the MCP endpoint (e.g. "http://localhost:4001/mcp")
+        url: String,
+    },
+}
+
 /// Configuration for a single MCP server
 #[derive(Debug, Clone, Deserialize)]
 pub struct McpServerConfig {
     /// Display name for the server
     pub name: String,
-    /// Command to execute (e.g. "npx", "uvx", "node")
-    pub command: String,
-    /// Arguments to the command
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Environment variables to set
-    #[serde(default)]
-    pub env: std::collections::HashMap<String, String>,
+    /// Transport configuration
+    #[serde(flatten)]
+    pub transport: McpTransport,
 }
 
 /// An MCP tool definition received from a server

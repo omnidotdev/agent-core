@@ -6,4 +6,4 @@ mod types;
 
 pub use client::McpClient;
 pub use manager::McpServerManager;
-pub use types::{McpServerConfig, McpTool, McpToolResult};
+pub use types::{McpServerConfig, McpTool, McpToolResult, McpTransport};
