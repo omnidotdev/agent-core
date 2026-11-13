@@ -99,7 +99,7 @@ pub struct ProviderConfig {
 /// Model information with provider association
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
-    /// Model identifier (e.g., "claude-sonnet-4-20250514", "gpt-4o")
+    /// Model identifier (e.g., "claude-sonnet-5-5", "gpt-4o")
     pub id: String,
     /// Provider name (e.g., "anthropic", "openai")
     pub provider: String,

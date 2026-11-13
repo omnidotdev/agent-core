@@ -99,15 +99,15 @@ pub fn default_models() -> Vec<ModelInfo> {
     vec![
         // Anthropic
         ModelInfo {
-            id: "claude-sonnet-4-20250514".to_string(),
+            id: "claude-sonnet-5-5".to_string(),
             provider: "anthropic".to_string(),
         },
         ModelInfo {
-            id: "claude-opus-4-20250514".to_string(),
+            id: "claude-opus-5-5".to_string(),
             provider: "anthropic".to_string(),
         },
         ModelInfo {
-            id: "claude-3-5-haiku-20241022".to_string(),
+            id: "claude-haiku-5-5".to_string(),
             provider: "anthropic".to_string(),
         },
         // OpenAI
@@ -246,6 +246,19 @@ mod tests {
     fn default_models_count() {
         let models = default_models();
         assert_eq!(models.len(), 20);
+    }
+
+    #[test]
+    fn default_anthropic_models_are_current() {
+        let anthropic: Vec<String> = default_models()
+            .into_iter()
+            .filter(|m| m.provider == "anthropic")
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            anthropic,
+            ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"]
+        );
     }
 
     #[test]
