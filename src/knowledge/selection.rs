@@ -303,7 +303,7 @@ mod tests {
     fn make_chunk(topic: &str, tags: &[&str], priority: KnowledgePriority) -> KnowledgeChunk {
         KnowledgeChunk {
             topic: Some(topic.to_string()),
-            tags: tags.iter().map(|t| t.to_string()).collect(),
+            tags: tags.iter().map(ToString::to_string).collect(),
             content: format!("Content about {topic}"),
             rules: vec![],
             priority,
