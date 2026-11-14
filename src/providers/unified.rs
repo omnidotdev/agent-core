@@ -235,6 +235,8 @@ fn convert_tools(tools: &[Tool]) -> Vec<LlmTool> {
                 description: t.description.clone(),
                 parameters: t.input_schema.clone(),
             },
+            // Tool definitions carry no prompt-caching directive
+            cache_control: None,
         })
         .collect()
 }
@@ -350,5 +352,26 @@ mod tests {
     fn mistral_requires_api_key() {
         let result = UnifiedProvider::mistral("");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn convert_tools_maps_function_without_cache_control() {
+        let tools = vec![Tool {
+            name: "shell".to_string(),
+            description: "Run a command".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+        }];
+
+        let converted = convert_tools(&tools);
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].tool_type, "function");
+        assert_eq!(converted[0].function.name, "shell");
+        assert_eq!(converted[0].function.description, "Run a command");
+        assert_eq!(
+            converted[0].function.parameters,
+            serde_json::json!({"type": "object"})
+        );
+        assert!(converted[0].cache_control.is_none());
     }
 }

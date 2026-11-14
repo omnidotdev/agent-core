@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn bytes_roundtrip() {
-        let embedding = vec![1.0, 2.5, -3.14, 0.0, 100.0];
+        let embedding = vec![1.0, 2.5, -3.25, 0.0, 100.0];
         let bytes = Embedder::to_bytes(&embedding);
         let restored = Embedder::from_bytes(&bytes);
 
