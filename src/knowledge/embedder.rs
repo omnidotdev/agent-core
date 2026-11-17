@@ -5,8 +5,13 @@ use std::time::Duration;
 use mini_moka::sync::Cache;
 use thiserror::Error;
 
+use super::endpoint::{OPENAI_BASE_URL, ensure_key_destination};
+
 /// Embedding dimension for text-embedding-3-small
 pub const EMBEDDING_DIM: usize = 1536;
+
+/// Default embedding model when talking to `OpenAI` directly
+pub const DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
 
 /// Maximum number of cached embeddings
 const CACHE_MAX_CAPACITY: u64 = 256;
@@ -18,8 +23,12 @@ const CACHE_TTL_SECS: u64 = 3600;
 #[derive(Debug, Error)]
 pub enum EmbedderError {
     /// Empty API key
-    #[error("OpenAI API key required for embeddings")]
+    #[error("API key required for embeddings")]
     MissingApiKey,
+
+    /// A Synapse API key was bound for a third-party vendor host
+    #[error("refusing to send a Synapse API key to third-party host {0}")]
+    SynapseKeyToVendor(String),
 
     /// HTTP request failed
     #[error("embedding request failed: {0}")]
@@ -37,12 +46,16 @@ pub enum EmbedderError {
     EmptyResponse,
 }
 
-/// Text embedder using `OpenAI`'s embedding API
+/// Text embedder for any OpenAI-compatible `/embeddings` endpoint
+///
+/// Points at `OpenAI` by default; pass a Synapse gateway base URL (with a
+/// provider-prefixed model id) to route embeddings through Synapse
 #[derive(Debug, Clone)]
 pub struct Embedder {
     client: reqwest::Client,
     api_key: String,
     model: String,
+    base_url: String,
     cache: Cache<String, Vec<f32>>,
 }
 
@@ -55,40 +68,75 @@ impl Embedder {
             .build()
     }
 
-    /// Create a new embedder with `OpenAI` API key
+    /// Create an embedder that calls `OpenAI` directly
     ///
     /// # Errors
     ///
-    /// Returns error if API key is empty
+    /// Returns error if the API key is empty or is a Synapse key
     pub fn new(api_key: String) -> Result<Self, EmbedderError> {
-        if api_key.is_empty() {
-            return Err(EmbedderError::MissingApiKey);
-        }
-
-        Ok(Self {
-            client: reqwest::Client::new(),
+        Self::with_config(
             api_key,
-            model: "text-embedding-3-small".to_string(),
-            cache: Self::build_cache(),
-        })
+            DEFAULT_EMBEDDING_MODEL.to_string(),
+            OPENAI_BASE_URL.to_string(),
+        )
     }
 
-    /// Create an embedder with a custom model
+    /// Create an embedder that calls `OpenAI` directly with a custom model
     ///
     /// # Errors
     ///
-    /// Returns error if API key is empty
+    /// Returns error if the API key is empty or is a Synapse key
     pub fn with_model(api_key: String, model: String) -> Result<Self, EmbedderError> {
+        Self::with_config(api_key, model, OPENAI_BASE_URL.to_string())
+    }
+
+    /// Create an embedder for an OpenAI-compatible endpoint
+    ///
+    /// `base_url` is the API root including its version segment (e.g.
+    /// `https://api.openai.com/v1` or `https://gateway.synapse.omni.dev/v1`);
+    /// requests go to `{base_url}/embeddings`
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the API key is empty, or if it is a Synapse key and
+    /// `base_url` points at a third-party vendor
+    pub fn with_config(
+        api_key: String,
+        model: String,
+        base_url: String,
+    ) -> Result<Self, EmbedderError> {
         if api_key.is_empty() {
             return Err(EmbedderError::MissingApiKey);
         }
+        let mut base_url = base_url;
+        base_url.truncate(base_url.trim_end_matches('/').len());
+        ensure_key_destination(&api_key, &base_url).map_err(EmbedderError::SynapseKeyToVendor)?;
 
         Ok(Self {
             client: reqwest::Client::new(),
             api_key,
             model,
+            base_url,
             cache: Self::build_cache(),
         })
+    }
+
+    /// Embedding model id sent with each request
+    #[must_use]
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// API root requests are sent under
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Full URL embedding requests are posted to
+    #[must_use]
+    pub fn endpoint_url(&self) -> String {
+        format!("{}/embeddings", self.base_url)
     }
 
     /// Generate embedding for a single text
@@ -155,7 +203,7 @@ impl Embedder {
         Ok(results.into_iter().map(Option::unwrap_or_default).collect())
     }
 
-    /// Call the `OpenAI` embeddings API
+    /// Call the configured OpenAI-compatible embeddings endpoint
     async fn fetch_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedderError> {
         #[derive(serde::Serialize)]
         struct EmbeddingRequest<'a> {
@@ -181,7 +229,7 @@ impl Embedder {
 
         let response = self
             .client
-            .post("https://api.openai.com/v1/embeddings")
+            .post(self.endpoint_url())
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&request)
             .send()
@@ -259,6 +307,143 @@ mod tests {
     fn valid_api_key_accepted() {
         let result = Embedder::new("sk-test123".to_string());
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn default_constructor_targets_openai() {
+        let embedder = Embedder::new("sk-test".to_string()).unwrap();
+        assert_eq!(
+            embedder.endpoint_url(),
+            "https://api.openai.com/v1/embeddings"
+        );
+        assert_eq!(embedder.model(), "text-embedding-3-small");
+    }
+
+    #[test]
+    fn with_config_targets_the_given_base_url() {
+        let embedder = Embedder::with_config(
+            "synapse_abc".to_string(),
+            "openai/text-embedding-3-small".to_string(),
+            "https://gateway.synapse.omni.dev/v1/".to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            embedder.endpoint_url(),
+            "https://gateway.synapse.omni.dev/v1/embeddings"
+        );
+        assert_eq!(embedder.model(), "openai/text-embedding-3-small");
+    }
+
+    #[test]
+    fn synapse_key_is_never_sent_to_openai() {
+        let err = Embedder::new("synapse_abc".to_string()).unwrap_err();
+        assert!(matches!(err, EmbedderError::SynapseKeyToVendor(_)));
+
+        let err = Embedder::with_model("synapse_abc".to_string(), "m".to_string()).unwrap_err();
+        assert!(matches!(err, EmbedderError::SynapseKeyToVendor(_)));
+    }
+
+    #[test]
+    fn synapse_key_is_rejected_for_any_vendor_host() {
+        for base_url in [
+            "https://api.openai.com/v1",
+            "https://API.OpenAI.com:443/v1",
+            "https://openrouter.ai/api/v1",
+            "https://api.together.xyz/v1",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        ] {
+            let result = Embedder::with_config(
+                "synapse_abc".to_string(),
+                "openai/text-embedding-3-small".to_string(),
+                base_url.to_string(),
+            );
+            assert!(
+                matches!(result, Err(EmbedderError::SynapseKeyToVendor(_))),
+                "synapse key accepted for {base_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn vendor_key_may_go_direct_to_vendor() {
+        let embedder = Embedder::with_config(
+            "sk-byok".to_string(),
+            "text-embedding-3-small".to_string(),
+            "https://api.openai.com/v1".to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            embedder.endpoint_url(),
+            "https://api.openai.com/v1/embeddings"
+        );
+    }
+
+    /// Serve one HTTP request, returning (request line, headers + body)
+    async fn serve_once(listener: tokio::net::TcpListener, body: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = socket.read(&mut chunk).await.unwrap();
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf).to_string();
+            if let Some(split) = text.find("\r\n\r\n") {
+                let content_length = text[..split]
+                    .lines()
+                    .find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        k.eq_ignore_ascii_case("content-length")
+                            .then(|| v.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                if buf.len() >= split + 4 + content_length {
+                    break;
+                }
+            }
+            if n == 0 {
+                break;
+            }
+        }
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+        String::from_utf8_lossy(&buf).to_string()
+    }
+
+    #[tokio::test]
+    async fn embed_posts_to_the_configured_base_url() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(serve_once(
+            listener,
+            r#"{"data":[{"embedding":[0.5,0.25],"index":0}]}"#,
+        ));
+
+        let embedder = Embedder::with_config(
+            "synapse_abc".to_string(),
+            "openai/text-embedding-3-small".to_string(),
+            format!("http://{addr}/v1"),
+        )
+        .unwrap();
+        let embedding = embedder.embed("hello").await.unwrap();
+        assert_eq!(embedding, vec![0.5, 0.25]);
+
+        let request = server.await.unwrap();
+        assert!(
+            request.starts_with("POST /v1/embeddings HTTP/1.1"),
+            "unexpected request: {request}"
+        );
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer synapse_abc"),
+            "missing bearer key: {request}"
+        );
+        assert!(request.contains(r#""model":"openai/text-embedding-3-small""#));
     }
 
     #[test]

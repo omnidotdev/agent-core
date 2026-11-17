@@ -7,6 +7,7 @@
 pub mod bm25;
 pub mod condenser;
 pub mod embedder;
+pub mod endpoint;
 mod models;
 pub mod reranker;
 mod resolver;
@@ -14,7 +15,10 @@ mod selection;
 
 pub use bm25::Bm25Scorer;
 pub use condenser::{CondenseError, LlmCondenser, QueryCondenser, build_retrieval_query_condensed};
-pub use embedder::{EMBEDDING_DIM, Embedder, EmbedderError, contextual_text};
+pub use embedder::{
+    DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIM, Embedder, EmbedderError, contextual_text,
+};
+pub use endpoint::{OPENAI_BASE_URL, SYNAPSE_KEY_PREFIX, is_synapse_key, is_vendor_host};
 pub use models::{
     KnowledgeChunk, KnowledgeConfig, KnowledgePack, KnowledgePackRef, KnowledgePriority,
     PackEmbeddings,
