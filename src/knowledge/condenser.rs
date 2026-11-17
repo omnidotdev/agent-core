@@ -3,6 +3,8 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
+use super::endpoint::{OPENAI_BASE_URL, ensure_key_destination};
+
 /// System prompt that instructs the LLM to produce a search query
 const CONDENSE_SYSTEM_PROMPT: &str = "\
 You are a search-query rewriter. Given a conversation history and the user's \
@@ -43,27 +45,25 @@ pub struct LlmCondenser {
 }
 
 impl LlmCondenser {
-    /// Create a condenser using OpenAI-compatible chat completions
+    /// Create a condenser that calls `OpenAI` chat completions directly
     ///
     /// # Errors
     ///
-    /// Returns error if API key is empty
+    /// Returns error if the API key is empty or is a Synapse key
     pub fn new(api_key: String) -> Result<Self, CondenseError> {
-        if api_key.is_empty() {
-            return Err(CondenseError::Request(
-                "API key required for query condensation".to_string(),
-            ));
-        }
-
-        Ok(Self {
-            client: reqwest::Client::new(),
+        Self::with_config(
             api_key,
-            model: "gpt-4o-mini".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-        })
+            "gpt-4o-mini".to_string(),
+            OPENAI_BASE_URL.to_string(),
+        )
     }
 
-    /// Create a condenser with a custom model and base URL
+    /// Create a condenser with a custom model and OpenAI-compatible base URL
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the API key is empty, or if it is a Synapse key and
+    /// `base_url` points at a third-party vendor
     pub fn with_config(
         api_key: String,
         model: String,
@@ -74,6 +74,13 @@ impl LlmCondenser {
                 "API key required for query condensation".to_string(),
             ));
         }
+        let mut base_url = base_url;
+        base_url.truncate(base_url.trim_end_matches('/').len());
+        ensure_key_destination(&api_key, &base_url).map_err(|host| {
+            CondenseError::Request(format!(
+                "refusing to send a Synapse API key to third-party host {host}"
+            ))
+        })?;
 
         Ok(Self {
             client: reqwest::Client::new(),
@@ -81,6 +88,18 @@ impl LlmCondenser {
             model,
             base_url,
         })
+    }
+
+    /// API root requests are sent under
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Chat model id used for condensing
+    #[must_use]
+    pub fn model(&self) -> &str {
+        &self.model
     }
 }
 
@@ -207,6 +226,37 @@ pub async fn build_retrieval_query_condensed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synapse_key_is_never_sent_to_openai() {
+        assert!(LlmCondenser::new("synapse_abc".to_string()).is_err());
+        assert!(
+            LlmCondenser::with_config(
+                "synapse_abc".to_string(),
+                "openai/gpt-4o-mini".to_string(),
+                "https://api.openai.com/v1".to_string(),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn synapse_key_may_go_to_the_gateway() {
+        let condenser = LlmCondenser::with_config(
+            "synapse_abc".to_string(),
+            "openai/gpt-4o-mini".to_string(),
+            "https://gateway.synapse.omni.dev/v1/".to_string(),
+        )
+        .unwrap();
+        assert_eq!(condenser.base_url(), "https://gateway.synapse.omni.dev/v1");
+        assert_eq!(condenser.model(), "openai/gpt-4o-mini");
+    }
+
+    #[test]
+    fn vendor_key_defaults_to_openai() {
+        let condenser = LlmCondenser::new("sk-byok".to_string()).unwrap();
+        assert_eq!(condenser.base_url(), "https://api.openai.com/v1");
+    }
 
     struct MockCondenser {
         response: Result<String, CondenseError>,
